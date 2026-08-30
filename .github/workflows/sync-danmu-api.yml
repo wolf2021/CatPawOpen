@@ -1,0 +1,83 @@
+name: Sync Danmu API
+
+# 定时/手动检测 danmu_api 上游新版本；有更新则：
+#   1. danmu:refresh —— 拉取最新源码重新打包成自包含 splice bundle
+#   2. 提交 vendor/danmu-api/ 到 master（用 GITHUB_TOKEN 推不会触发 deploy.yml，防循环）
+#   3. 本 workflow 内自行 build 并 force-push dist 分支
+#
+# 与 sync-upstream.yml（同步 douer 引擎）解耦：douer 引擎更新走那边，
+# 弹幕 API 版本更新走这里；两者都会重建 dist。
+#
+# 上游不可达/无更新：跳过，保留本地 vendor，不影响日常构建。
+
+on:
+  schedule:
+    - cron: '30 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: nodejs/package-lock.json
+
+      - name: Compare danmu_api version with upstream
+        id: check
+        working-directory: nodejs
+        run: node scripts/check-danmu-api.mjs
+
+      - name: Skip when upstream unreachable
+        if: steps.check.outputs.reachable == 'false'
+        run: |
+          echo "danmu_api upstream unreachable — keeping vendor v${{ steps.check.outputs.local }}"
+
+      - name: Refresh danmu_api bundle when changed
+        if: steps.check.outputs.changed == 'true'
+        working-directory: nodejs
+        run: npm run danmu:refresh
+
+      - name: Commit and push vendor update
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add nodejs/vendor/danmu-api/
+          if git diff --cached --quiet; then
+            echo "no danmu_api changes after refresh"
+            exit 0
+          fi
+          git commit -m "chore: sync danmu_api to ${{ steps.check.outputs.remote }}"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Install and build
+        if: steps.check.outputs.changed == 'true'
+        working-directory: nodejs
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to dist branch
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          mkdir -p deploy/nodejs deploy/docx-cleaner
+          cp -r nodejs/dist deploy/nodejs/
+          cp -r docx-cleaner/web/* deploy/docx-cleaner/
+          cd deploy
+          git init
+          git checkout -b dist
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "deploy: sync danmu_api ${{ steps.check.outputs.remote }} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" dist

@@ -15,7 +15,9 @@
         "build:local": "rimraf dist && node esbuild.js && node esbuild-config.js",
         "build:config": "cross-env NODE_ENV=production node esbuild-config.js",
         "build:rollup(obsolete)": "rimraf dist && cross-env NODE_ENV=production node rollup.js && cross-env NODE_ENV=production node rollup-config.js",
-        "build:rollup:config(obsolete)": "cross-env NODE_ENV=production node rollup-config.js"
+        "build:rollup:config(obsolete)": "cross-env NODE_ENV=production node rollup-config.js",
+        "danmu:refresh": "node scripts/refresh-danmu-api.mjs",
+        "danmu:check": "node scripts/check-danmu-api.mjs"
     },
     "author": "",
     "devDependencies": {
@@ -35,6 +37,7 @@
         "rollup": "^2.79.1"
     },
     "dependencies": {
+        "acorn": "^8.18.0",
         "axios": "^1.6.7",
         "cheerio": "^1.0.0-rc.12",
         "crypto-js": "^4.2.0",
