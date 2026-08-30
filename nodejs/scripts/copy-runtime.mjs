@@ -67,6 +67,10 @@ if (!rw.patched) {
   console.error('strip: 弹幕入口未重写（可能已重写过或结构变化），中止以保护运行时。');
   process.exit(1);
 }
+if (!rw.envExposed) {
+  console.error('strip: 未找到 exn 环境变量处理器锚点，无法暴露 __danmuApiEnvHandler，中止。');
+  process.exit(1);
+}
 
 // 1.5) 运行时配置存储（旧内嵌弹幕全局对象）里残留的 VERSION 字段是活值（env 解析器按 "version" 读取），
 //      把它同步为 splice 版本，避免对外暴露过期的旧版本号。

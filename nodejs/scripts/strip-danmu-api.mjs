@@ -31,12 +31,27 @@ export function rewireDanmuBridge(src) {
     );
   }
   const oldFn = m[1];
-  if (oldFn === '__danmuApiHandleRequest') return { text: src, patched: false, oldFn };
-  return {
-    text: src.replace(re, 'l=await globalThis.__danmuApiHandleRequest(c,u,"node",'),
-    patched: true,
-    oldFn,
-  };
+  if (oldFn === '__danmuApiHandleRequest') {
+    return { text: src, patched: false, oldFn, envExposed: false };
+  }
+
+  let text = src.replace(re, 'l=await globalThis.__danmuApiHandleRequest(c,u,"node",');
+
+  // 复刻旧版 douer 对旧 danmu_api HandlerFactory 的补丁语义：把 douer 自带的内存
+  // 环境变量处理器 exn（pEe：写 process.env + a0.overrides + 持久化 + 刷新 i4 快照）
+  // 暴露为 globalThis.__danmuApiEnvHandler，供 splice 里的新版 HandlerFactory 在
+  // node 平台下委托，从而恢复「修改弹幕 API 环境变量」能力。
+  const exnAnchor = 'return!r||r==="node"?exn:tR.call(Es,t)},Dz=!0,ha(';
+  let envExposed = false;
+  if (text.includes(exnAnchor)) {
+    text = text.replace(
+      exnAnchor,
+      'return!r||r==="node"?exn:tR.call(Es,t)},Dz=!0,globalThis.__danmuApiEnvHandler=exn,ha('
+    );
+    envExposed = true;
+  }
+
+  return { text, patched: true, oldFn, envExposed };
 }
 
 // ---------- 引用收集（跳过所有绑定位置；不做作用域消解 → 宁可多保留） ----------
@@ -345,7 +360,10 @@ if (entry && self && entry === fs.realpathSync(self)) {
     process.exit(2);
   }
   const { text, rewire: rw, stats } = stripDeadCode(fs.readFileSync(inFile, 'utf8'));
-  if (rw.patched) console.log(`rewire: ${rw.oldFn} -> globalThis.__danmuApiHandleRequest`);
+  if (rw.patched) {
+    console.log(`rewire: ${rw.oldFn} -> globalThis.__danmuApiHandleRequest`);
+    console.log(`env handler exposed: ${rw.envExposed ? 'globalThis.__danmuApiEnvHandler = exn' : 'NO (anchor not found!)'}`);
+  }
   console.log(`total: ${stats.total}, kept: ${stats.kept}, removed: ${stats.removed} (${stats.removedDefs} defs)`);
   console.log(`removed bytes: ${(stats.removedBytes / 1024 / 1024).toFixed(2)} MB`);
   if (stats.deadStoreRemoved) {

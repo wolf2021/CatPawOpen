@@ -46,6 +46,34 @@ function run(cmd, args, opts = {}) {
 
 const ENTRY_SHIM = `// 由 refresh-danmu-api.mjs 生成：导出 handleRequest 并挂到全局
 import { handleRequest } from './danmu_api/worker.js';
+import { HandlerFactory } from './danmu_api/configs/handlers/handler-factory.js';
+
+// 嵌入 CatPaw/douer 运行时：宿主（douer）通过 globalThis.__danmuApiEnvHandler
+// 暴露自己的内存环境变量处理器（含持久化 + 快照刷新）。node 平台下优先委托给它，
+// 复刻旧版 douer 对旧 danmu_api HandlerFactory 的补丁语义；否则退回进程内存写入。
+// 注意：新版 handler-factory 用 ['../xxx', '.js'].join('') 动态 import，
+// esbuild 无法静态打包，直接调用会在运行时「Cannot find module node-handler.js」。
+const _origGetHandler = HandlerFactory.getHandler.bind(HandlerFactory);
+HandlerFactory.getHandler = async function (deployPlatform) {
+  const p = String(deployPlatform == null ? '' : deployPlatform).toLowerCase();
+  if (p === 'node' || p === '' || p === 'undefined' || p === 'null') {
+    const host = globalThis.__danmuApiEnvHandler;
+    if (host) {
+      return {
+        async setEnv(k, v) { return !!(await host.setEnv(k, v)); },
+        async addEnv(k, v) { return !!(await host.addEnv(k, v)); },
+        async delEnv(k) { return !!(await host.delEnv(k)); },
+      };
+    }
+    return {
+      async setEnv(k, v) { try { process.env[String(k)] = String(v); return true; } catch { return false; } },
+      async addEnv(k, v) { try { process.env[String(k)] = String(v); return true; } catch { return false; } },
+      async delEnv(k) { try { delete process.env[String(k)]; return true; } catch { return false; } },
+    };
+  }
+  return _origGetHandler(deployPlatform);
+};
+
 globalThis.__danmuApiHandleRequest = handleRequest;
 `;
 
